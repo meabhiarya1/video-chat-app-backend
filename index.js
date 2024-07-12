@@ -7,48 +7,46 @@ const app = express();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: "*", // Replace "*" with your frontend's URL for better security
-    methods: ["GET", "POST"],
-  },
+  cors: true,
 });
 
 app.use(cors());
 app.use(express.json());
 
-const emailToSocketMapping = new Map();
-const socketToEmailMapping = new Map();
+const emailToSocketIdMap = new Map();
+const socketIdToEmailMap = new Map();
 
 io.on("connection", (socket) => {
-  console.log("New Connection");
-  
-  //   for listening we use "on" and for sending we use "emit"
-  socket.on("join-room", (data) => {
-    const { roomID, emailID } = data;
-    if (!roomID || !emailID) {
-      console.log("Invalid data received");
-      return;
-    }
+  console.log("Socket Connected", socket.id);
 
-    console.log(`User ${emailID} joined Room ${roomID}`);
-    emailToSocketMapping.set(emailID, socket.id);
-    socketToEmailMapping.set(socket.id, emailID);
-    socket.join(roomID);
-    socket.emit("joined-room", { roomID });
-    socket.broadcast.to(roomID).emit("user-joined", { emailID });
+  //Fisrt step
+  socket.on("room:join", (data) => {
+    const { email, room } = data;
+    emailToSocketIdMap.set(email, socket.id);
+    socketIdToEmailMap.set(socket.id, email);
+    io.to(room).emit("user:joined", { email, id: socket.id });
+    socket.join(room);
+    io.to(socket.id).emit("room:join", data);
   });
 
-  socket.on("call-user", (data) => {
-    const { emailID, offer } = data;
-    const fromEmail = socketToEmailMapping.get(socket.id);
-    const socketID = emailToSocketMapping.get(emailID);
-    socket.to(socketID).emit("incoming-call", { from: fromEmail, offer });
+  //Second step
+  socket.on("user:call", ({ to, offer }) => {
+    io.to(to).emit("incomming:call", { from: socket.id, offer });
   });
 
-  socket.on("call-accepted", (data) => {
-    const { emailID, ans } = data;
-    const socketId = emailToSocketMapping.get(emailID);
-    socket.to(socketId).emit("call-accepted", { ans });
+  //Third step
+  socket.on("call:accepted", ({ to, ans }) => {
+    io.to(to).emit("call:accepted", { from: socket.id, ans });
+  });
+
+  //Fourth step
+  socket.on("peer:nego:needed", ({ to, offer }) => {
+    io.to(to).emit("peer:nego:needed", { from: socket.id, offer });
+  });
+
+  //Fifth step
+  socket.on("peer:nego:done", ({ to, ans }) => {
+    io.to(to).emit("peer:nego:final", { from: socket.id, ans });
   });
 });
 
